@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "name": "xml-envelope",
+  "initializer": {
+    "function": "initRequest"
+  },
+  "aliases": {
+    "Asset": ["UsageCollection.Asset"],
+    "DeviceConsumableTree": [
+      "UsageCollection.Asset.Result.WsUsage.DeviceSupplies"
+    ],
+    "DeviceConsumableTreeSupply": [
+      "$pre.DeviceSupplies.Envelope.Body.Supplies.SupplyList.Supply"
+    ]
+  },
+  "rules": {
+    "message.sourceSystemId": {
+      "mappings": ["UsageCollection.UsageService.SystemId"],
+      "value": "DefaultSourceSystemId"
+    },
+    "message.messageId": {
+      "mappings": ["UsageCollection.TransactionID"]
+    },
+    "collector.name": {
+      "mappings": ["@metadata.source"]
+    },
+    "collector.collectionMethodType": {
+      "value": "AutoCollection"
+    },
+    "device.serialNumber": {
+      "mappings": ["Asset.AssetSerialNumber"]
+    },
+    "device.consumables.0.ConsumableType": {
+      "mappings": ["DeviceConsumableTreeSupply.0.ConsumableTypeEnum"],
+      "required": true
+    },
+    "device.consumables.1.ConsumableType": {
+      "mappings": ["DeviceConsumableTreeSupply.1.ConsumableTypeEnum"]
+    }
+  }
+}

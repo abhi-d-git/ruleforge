@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-example",
+    "rootDir": ".",
+    "noEmit": false,
+
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "sourceMap": true
+  },
+  "include": ["examples/**/*.ts", "examples/**/*.json", "src/**/*.ts"]
+}

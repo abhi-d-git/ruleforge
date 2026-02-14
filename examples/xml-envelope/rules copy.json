@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "name": "xml-envelope",
+  "initializer": {
+    "function": "initRequest"
+  },
+  "rules": {
+    "customer.id": [
+      {
+        "mappings": [
+          "order.user.@id",
+          "order.user.id"
+        ]
+      }
+    ]
+  }
+}

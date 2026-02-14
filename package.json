@@ -1,0 +1,59 @@
+{
+  "name": "ruleforge",
+  "version": "0.1.0",
+  "description": "Declarative rule engine to map JSON/XML payloads into canonical nested JSON.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "clean": "rimraf dist dist-example",
+    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "build:examples": "rimraf dist-example && tsc -p tsconfig.example.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "rimraf": "^6.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abhi-d-git/ruleforge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/abhi-d-git/ruleforge/issues"
+  },
+  "homepage": "https://github.com/abhi-d-git/ruleforge#readme",
+  "keywords": [
+    "rule-engine",
+    "mapping",
+    "transform",
+    "integration",
+    "xml",
+    "json",
+    "etl",
+    "canonical-model"
+  ]
+}

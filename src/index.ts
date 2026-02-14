@@ -14,6 +14,9 @@ export type {
 export type { FunctionRegistry, MapperContext } from "./types/functions.js";
 export { Mapper } from "./core/Mapper.js";
 
+export { normalizePayload } from "./parsing/normalize.js";
+export { asRuleDocumentV1 } from "./core/validateSpec.js";
+
 import type { MapperOptions } from "./core/Mapper.js";
 import { Mapper as MapperClass } from "./core/Mapper.js";
 

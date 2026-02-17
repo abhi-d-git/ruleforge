@@ -1,13 +1,13 @@
 {
   "version": "1.0",
   "rules": {
-    "match.0.customerDevice": [
+    "match.customerDevice": [
       {
         "conditions": {
           "customers.$X1.fleet.id": ["fleetId_5", "fleetId_1", "fleetId_100"],
           "customers.$X1.devices.$X2.id": "deviceId_10"
         },
-        "value": 500,
+        "mappings": ["customers.$X1.devices.$X2.serialNum"],
         "required": true
       }
     ]

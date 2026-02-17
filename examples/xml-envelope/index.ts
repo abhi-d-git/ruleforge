@@ -75,7 +75,7 @@ async function initRequest(input: any) {
 
   return {
     metadata: input.metadata,
-    payload: xmlPayload,
+    payload: outer.obj,
     payloadType: "auto" as const,
     pre,
   };

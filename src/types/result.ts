@@ -25,6 +25,7 @@ export interface MapError {
     | "NO_RULE_MATCHED_REQUIRED"
     | "TRANSFORM_ERROR"
     | "INVALID_SELECTOR_ROOT"
+    | "INVALID_LOOP_RULE"
     | "NOT_IMPLEMENTED";
   message: string;
   field?: string;

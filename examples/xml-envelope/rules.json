@@ -30,12 +30,13 @@
     "device.serialNumber": {
       "mappings": ["Asset.AssetSerialNumber"]
     },
-    "device.consumables.0.ConsumableType": {
-      "mappings": ["DeviceConsumableTreeSupply.0.ConsumableTypeEnum"],
+    "device.consumables.$X.ConsumableType": {
+      "mappings": ["DeviceConsumableTreeSupply.$X.ConsumableTypeEnum"],
       "required": true
     },
-    "device.consumables.1.ConsumableType": {
-      "mappings": ["DeviceConsumableTreeSupply.1.ConsumableTypeEnum"]
+    "device.consumables.$X.Description": {
+      "mappings": ["DeviceConsumableTreeSupply.$X.Description"],
+      "required": true
     }
   }
 }

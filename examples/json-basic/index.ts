@@ -20,4 +20,4 @@ const input = {
 };
 const result = await mapper.map(input);
 
-// console.log(JSON.stringify(result, null, 2));
+console.log(JSON.stringify(result, null, 2));

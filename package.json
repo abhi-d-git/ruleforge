@@ -20,7 +20,7 @@
   "scripts": {
     "clean": "rimraf dist dist-example",
     "build": "rimraf dist && tsc -p tsconfig.build.json",
-    "build:examples": "rimraf dist-example && tsc -p tsconfig.example.json",
+    "build:examples": "rimraf dist-example && tsc -p tsconfig.example.json && cp -R ./examples/common/payloads ./dist-example/examples/common/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -1,0 +1,205 @@
+{
+  "version": "1.0",
+  "name": "rules_v1",
+  "initializer": {
+    "function": "initRequest"
+  },
+  "aliases": {
+    "Asset": ["$pre.jsonData.device", "UsageCollection.Asset"],
+    "Customer": ["payload.customers", "UsageCollection.Account"],
+    "ConsumableTree": [
+      "payload.ConsumableTreeSupply",
+      "$pre.deviceSupplies.Envelope.Body.Supplies.SupplyList"
+    ],
+    "SubUnits": [
+      "payload.CounterSubunit",
+      "UsageCollection.Asset.Result.CounterSubunit"
+    ]
+  },
+  "preprocessors": {
+    "source_system": { "function": "getSourceSystem" },
+    "protocol": { "function": "getProtocolName" },
+    "onlyForLogging": { "function": "onlyForLogging" }
+  },
+  "postProcessors": ["convertOutputData"],
+  "rules": {
+    "transformed.source": {
+      "conditions": {
+        "$pre.source_system": {
+          "all": [
+            { "equalsIgnoreCase": "aGENT_1" },
+            { "regex": "Agent_[0-9]+" }
+          ]
+        }
+      },
+      "mappings": ["$pre.source_system"]
+    },
+    "transformed.source1": {
+      "conditions": {
+        "$pre.source_system": {
+          "inIgnoreCase": ["agent_1", "agent_2"]
+        }
+      },
+      "mappings": ["$pre.source_system"]
+    },
+    "transformed.source3": {
+      "conditions": {
+        "$pre.source_system": {
+          "regex": "^Agent_[0-9]+$",
+          "flags": "i"
+        }
+      },
+      "mappings": ["$pre.source_system"]
+    },
+    "transformed.balance": {
+      "conditions": {
+        "payload.account.balance": { "gt": 1000 }
+      },
+      "mappings": ["payload.account.balance"]
+    },
+    "transformed.device.serialNumber": [
+      {
+        "mappings": ["Asset.serialNumber", "Asset.AssetSerialNumber"]
+      }
+    ],
+    "transformed.customer.id": [
+      {
+        "conditions": { "Customer.$X1.fleet.id": "fleetId_5" },
+        "mappings": [
+          "WrongMapping.AccountID",
+          "Customer.$X1.fleet.id",
+          "Customer.AccountID"
+        ]
+      },
+      {
+        "conditions": { "Customer.AccountID": "Account_1" },
+        "mappings": [
+          "WrongMapping.AccountID",
+          "Customer.$X1.fleet.id",
+          "Customer.AccountID"
+        ]
+      }
+    ],
+    "transformed.customer.name": [
+      {
+        "conditions": { "Customer.$X1.fleet.id": "fleetId_5" },
+        "mappings": [
+          "WrongMapping.AccountID",
+          { "path": "Customer.$X1.fleet.name", "transform": ["trim", "upper"] },
+          { "path": "Customer.name", "transform": ["trim", "upper"] }
+        ]
+      },
+      {
+        "conditions": { "Customer.AccountID": "Account_1" },
+        "mappings": [
+          "WrongMapping.AccountID",
+          { "path": "Customer.$X1.fleet.name", "transform": ["trim", "upper"] },
+          { "path": "Customer.name", "transform": ["trim", "upper"] }
+        ]
+      }
+    ],
+    "transformed.defaultValue": [
+      {
+        "mappings": [
+          "WrongMapping.AccountID",
+          "Customer.$X1.fleet.name",
+          "Customer.name"
+        ],
+        "value": "AlwaysdefaultValue"
+      }
+    ],
+    "transformed.consumable.0.name": [
+      {
+        "conditions": {
+          "ConsumableTree.$X1.Type": { "equalsIgnoreCase": "fuser" }
+        },
+        "mappings": ["ConsumableTree.$X1.Type"]
+      },
+      {
+        "conditions": {
+          "ConsumableTree.Supply.$X1.ConsumableTypeEnum": {
+            "equalsIgnoreCase": "fuSEr"
+          }
+        },
+        "mappings": ["ConsumableTree.Supply.$X1.ConsumableTypeEnum"]
+      }
+    ],
+    "transformed.consumable.0.description": [
+      {
+        "conditions": {
+          "ConsumableTree.$X1.Type": "fuser"
+        },
+        "mappings": ["ConsumableTree.$X1.Description"]
+      },
+      {
+        "conditions": {
+          "ConsumableTree.Supply.$X1.ConsumableTypeEnum": "fuser"
+        },
+        "mappings": ["ConsumableTree.Supply.$X1.Description"]
+      }
+    ],
+    "transformed.consumable.0.productNumber": [
+      {
+        "conditions": {
+          "ConsumableTree.$X1.Type": { "equalsIgnoreCase": "fuser" }
+        },
+        "mappings": ["ConsumableTree.$X1.modelNumber"]
+      },
+      {
+        "conditions": {
+          "ConsumableTree.Supply.$X1.ConsumableTypeEnum": {
+            "equalsIgnoreCase": "fuser"
+          }
+        },
+        "mappings": ["ConsumableTree.Supply.$X1.ProductNumber"]
+      }
+    ],
+    "transformed.consumable.1.name": [
+      {
+        "conditions": { "ConsumableTree.$X1.Type": "toner" },
+        "mappings": ["ConsumableTree.$X1.Type"]
+      },
+      {
+        "conditions": {
+          "ConsumableTree.Supply.$X1.ConsumableTypeEnum": "toner"
+        },
+        "mappings": ["ConsumableTree.Supply.$X1.ConsumableTypeEnum"]
+      }
+    ],
+    "transformed.consumable.1.description": [
+      {
+        "conditions": { "ConsumableTree.$X1.Type": "toner" },
+        "mappings": ["ConsumableTree.$X1.Description"]
+      },
+      {
+        "conditions": {
+          "ConsumableTree.Supply.$X1.ConsumableTypeEnum": "toner"
+        },
+        "mappings": ["ConsumableTree.Supply.$X1.Description"]
+      }
+    ],
+    "transformed.consumable.1.productNumber": [
+      {
+        "conditions": { "ConsumableTree.$X1.Type": "toner" },
+        "mappings": ["ConsumableTree.$X1.modelNumber"]
+      },
+      {
+        "conditions": {
+          "ConsumableTree.Supply.$X1.ConsumableTypeEnum": "toner"
+        },
+        "mappings": ["ConsumableTree.Supply.$X1.ProductNumber"]
+      }
+    ],
+    "transformed.subunitValue": [
+      {
+        "conditions": {
+          "SubUnits.CounterGroup.$X1.CounterGroupName": "OuterGroup1",
+          "SubUnits.CounterGroup.$X1.CounterGroup.$X2.Counter.$X3.CounterName": "TotalSheets"
+        },
+        "mappings": [
+          "SubUnits.CounterGroup.$X1.CounterGroup.$X2.Counter.$X3.FixedPointNumber.Significand"
+        ]
+      }
+    ]
+  }
+}

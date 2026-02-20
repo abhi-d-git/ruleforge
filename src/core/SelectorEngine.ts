@@ -1,35 +1,63 @@
-import type { RuleEntryV1, MappingV1, MappingObjV1 } from "../types/spec.js";
-import type { Namespaces, ResolveOptions } from "../resolvers/PathResolver.js";
-import { resolvePath } from "../resolvers/PathResolver.js";
+import type { RuleEntryV1 } from "../types/spec.js";
+import { resolvePath, type Namespaces } from "../resolvers/PathResolver.js";
+import { matchesExpected } from "./ConditionEvaluator.js";
 
-export type SelectorVar = "$X1" | "$X2";
-export type SelectorBindings = Partial<Record<SelectorVar, number>>;
+// --------------------
+// Types
+// --------------------
 
-export type SelectorOutcome =
-  | { kind: "none" }
-  | {
-      kind: "bound";
-      bindings: SelectorBindings;
-      roots: Partial<Record<SelectorVar, string>>;
-    };
+export type SelectorVar = `$X${number}`; // runtime-checked
+export type SelectorBindings = Record<string, number>;
 
 export interface SelectorContext {
   ns: Namespaces;
-  resolveOpts: ResolveOptions;
+  resolveOpts: {
+    allowBarePaths: boolean;
+    aliases?: Record<string, ReadonlyArray<string>>;
+  };
 }
 
-/**
- * Binds $X1 (outer) then $X2 (nested) using conditions (AND equals-to-constant).
- *
- * Example conditions:
- *  - customers.$X1.fleet.id = "fleetId_5"
- *  - customers.$X1.devices.$X2.id = "deviceId_1"
- *
- * Binding:
- *  - bind $X1 using pure-$X1 conditions
- *  - bind $X2 using conditions containing $X2 (after $X1 is bound)
- */
+export type SelectorOutcome =
+  | { kind: "none" }
+  | { kind: "bound"; bindings: SelectorBindings; roots: Record<string, string> }
+  | {
+      kind: "boundMany";
+      bindings: SelectorBindings[];
+      roots: Record<string, string>;
+    };
+
+// --------------------
+// Guardrails
+// --------------------
+
+const MAX_VARS = 10; // $X1..$X10
+const MAX_SOLUTIONS = 10_000; // cap results returned
+const MAX_SCAN_PER_ARRAY = 5_000; // cap scanning a single array
+const MAX_ATTEMPTS = 200_000; // cap total DFS node expansions (critical)
+
+// --------------------
+// Public APIs
+// --------------------
+
 export function bindSelectorsV1(
+  entry: RuleEntryV1,
+  ctx: SelectorContext,
+): { ok: true; result: SelectorOutcome } | { ok: false; error: Error } {
+  const r = bindSelectorsAllV1(entry, ctx);
+  if (!r.ok) return r;
+
+  if (r.result.kind === "boundMany") {
+    const first = r.result.bindings[0];
+    if (!first) return { ok: true, result: { kind: "none" } };
+    return {
+      ok: true,
+      result: { kind: "bound", bindings: first, roots: r.result.roots },
+    };
+  }
+  return r;
+}
+
+export function bindSelectorsAllV1(
   entry: RuleEntryV1,
   ctx: SelectorContext,
 ): { ok: true; result: SelectorOutcome } | { ok: false; error: Error } {
@@ -37,224 +65,337 @@ export function bindSelectorsV1(
     const conditions = entry.conditions ?? {};
     const keys = Object.keys(conditions);
 
+    // 1) detect used vars ($X1..$X10) from condition keys
     const usedVars = detectUsedVars(keys);
-    if (usedVars.size === 0) return { ok: true, result: { kind: "none" } };
+    if (usedVars.length === 0) return { ok: true, result: { kind: "none" } };
 
-    for (const v of usedVars) {
-      if (v !== "$X1" && v !== "$X2")
-        throw new Error(`Unsupported selector var in v1: ${v}`);
+    if (usedVars.length > MAX_VARS) {
+      throw new Error(
+        `Too many selector variables (${usedVars.length}). Max supported is ${MAX_VARS}.`,
+      );
     }
 
-    const roots = detectRoots(keys);
-    const bindings: SelectorBindings = {};
+    // 2) infer roots per var (prefix up to var segment)
+    const roots = detectRoots(keys, usedVars);
 
-    // 0) evaluate fixed (no vars) conditions first
-    const fixedKeys = keys.filter(
-      (k) => !containsVar(k, "$X1") && !containsVar(k, "$X2"),
-    );
+    // 3) Evaluate fixed conditions (NO vars) early  ✅ FIXED
+    const fixedKeys = keys.filter((k) => !hasAnyVarSegment(k));
     for (const k of fixedKeys) {
       const expected = conditions[k];
       const r = resolvePath(ctx.ns, k, ctx.resolveOpts);
-      if (!matchesExpected(r.value, expected))
+
+      const m = matchesExpected(r.value, expected);
+      if (!m.ok) throw new Error(m.error); // or return INVALID_CONDITION
+      if (!m.matched) {
         return { ok: true, result: { kind: "none" } };
+      }
     }
 
-    // 1) bind $X1 if used
-    if (usedVars.has("$X1")) {
-      const x1Root = roots["$X1"];
-      if (!x1Root) throw new Error("Internal: $X1 used but root not found");
+    // 4) Compile condition list (only var-containing conditions)
+    const condList: Array<{ key: string; expected: any; vars: SelectorVar[] }> =
+      keys
+        .filter((k) => hasAnyVarSegment(k))
+        .map((k) => ({
+          key: k,
+          expected: conditions[k],
+          vars: varsInPath(k),
+        }));
 
-      const x1Keys = keys.filter(
-        (k) => containsVar(k, "$X1") && !containsVar(k, "$X2"),
-      );
-      if (x1Keys.length === 0) return { ok: true, result: { kind: "none" } };
+    // 5) Variable ordering heuristic:
+    // Prefer vars that appear in the most conditions (more constrained) first.
+    const order = orderVarsByConstraintStrength(usedVars, condList);
 
-      const x1 = bindVarByScanningRoot(
-        "$X1",
-        x1Root,
-        x1Keys,
-        conditions,
-        bindings,
-        ctx,
-      );
-      if (x1 == null) return { ok: true, result: { kind: "none" } };
-      bindings["$X1"] = x1;
-    }
+    // 6) DFS search with attempt guardrail
+    const solutions: SelectorBindings[] = [];
+    const bindings: SelectorBindings = {};
+    const state = { attempts: 0 };
 
-    // 2) bind $X2 if used
-    if (usedVars.has("$X2")) {
-      const x2RootRaw = roots["$X2"];
-      if (!x2RootRaw) throw new Error("Internal: $X2 used but root not found");
+    dfsBind({
+      ctx,
+      order,
+      roots,
+      condList,
+      idx: 0,
+      bindings,
+      solutions,
+      state,
+    });
 
-      const x2Root = applyBindingsToPath(x2RootRaw, bindings);
-      const x2Keys = keys.filter((k) => containsVar(k, "$X2"));
-
-      const x2 = bindVarByScanningRoot(
-        "$X2",
-        x2Root,
-        x2Keys,
-        conditions,
-        bindings,
-        ctx,
-      );
-      if (x2 == null) return { ok: true, result: { kind: "none" } };
-      bindings["$X2"] = x2;
-    }
-
-    // 3) final verify: all conditions with bindings applied
-    for (const k of keys.filter((k) => containsAnyVar(k))) {
-      const expected = conditions[k];
-      const kk = applyBindingsToPath(k, bindings);
-      const r = resolvePath(ctx.ns, kk, ctx.resolveOpts);
-      if (!matchesExpected(r.value, expected))
-        return { ok: true, result: { kind: "none" } };
-    }
-
-    return { ok: true, result: { kind: "bound", bindings, roots } };
+    if (solutions.length === 0) return { ok: true, result: { kind: "none" } };
+    return {
+      ok: true,
+      result: { kind: "boundMany", bindings: solutions, roots },
+    };
   } catch (e: any) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }
 
-export function applyBindingsToPath(
-  path: string,
-  bindings: SelectorBindings,
-): string {
-  let out = path;
-  if (bindings["$X1"] !== undefined) {
-    out = out
-      .replaceAll(".$X1.", `.${bindings["$X1"]}.`)
-      .replaceAll(".$X1", `.${bindings["$X1"]}`);
+// --------------------
+// DFS core
+// --------------------
+
+function dfsBind(args: {
+  ctx: SelectorContext;
+  order: SelectorVar[];
+  roots: Record<string, string>;
+  condList: Array<{ key: string; expected: any; vars: SelectorVar[] }>;
+  idx: number;
+  bindings: SelectorBindings;
+  solutions: SelectorBindings[];
+  state: { attempts: number };
+}): void {
+  const { ctx, order, roots, condList, idx, bindings, solutions, state } = args;
+
+  if (solutions.length >= MAX_SOLUTIONS) return;
+  if (state.attempts >= MAX_ATTEMPTS) return;
+
+  // If all vars assigned, validate all conditions fully and record solution.
+  if (idx >= order.length) {
+    for (const c of condList) {
+      const kk = applyBindingsToPath(c.key, bindings);
+      if (hasUnresolvedSelectorToken(kk)) return;
+      const r = resolvePath(ctx.ns, kk, ctx.resolveOpts);
+      const m = matchesExpected(r.value, c.expected);
+      if (!m.ok) throw new Error(m.error); // or return INVALID_CONDITION
+      if (!m.matched) return;
+    }
+    solutions.push({ ...bindings });
+    return;
   }
-  if (bindings["$X2"] !== undefined) {
-    out = out
-      .replaceAll(".$X2.", `.${bindings["$X2"]}.`)
-      .replaceAll(".$X2", `.${bindings["$X2"]}`);
+
+  const v = order[idx]!;
+  const rootTpl = roots[v];
+  if (!rootTpl) return;
+
+  const rootConcrete = applyBindingsToPath(rootTpl, bindings);
+  if (hasUnresolvedSelectorToken(rootConcrete)) return;
+
+  const rr = resolvePath(ctx.ns, rootConcrete, ctx.resolveOpts);
+  const arr = rr.value;
+  if (!Array.isArray(arr)) return;
+
+  const maxScan = Math.min(arr.length, MAX_SCAN_PER_ARRAY);
+
+  for (let i = 0; i < maxScan; i++) {
+    state.attempts++;
+    if (state.attempts >= MAX_ATTEMPTS) return;
+
+    bindings[v] = i;
+
+    // Early pruning: check any conditions that became fully grounded by setting this var.
+    if (partialConditionsHold(condList, bindings, ctx)) {
+      dfsBind({ ...args, idx: idx + 1 });
+      if (solutions.length >= MAX_SOLUTIONS) {
+        delete bindings[v];
+        return;
+      }
+    }
+
+    delete bindings[v];
+  }
+}
+
+function partialConditionsHold(
+  condList: Array<{ key: string; expected: any; vars: SelectorVar[] }>,
+  bindings: SelectorBindings,
+  ctx: SelectorContext,
+): boolean {
+  for (const c of condList) {
+    // only evaluate conditions where all vars are assigned
+    for (const v of c.vars) {
+      if (typeof bindings[v] !== "number") {
+        // not fully bound yet
+        continue;
+      }
+    }
+
+    // Check fully-bound conditions only
+    let allBound = true;
+    for (const v of c.vars) {
+      if (typeof bindings[v] !== "number") {
+        allBound = false;
+        break;
+      }
+    }
+    if (!allBound) continue;
+
+    const kk = applyBindingsToPath(c.key, bindings);
+    if (hasUnresolvedSelectorToken(kk)) return false;
+
+    const r = resolvePath(ctx.ns, kk, ctx.resolveOpts);
+    const m = matchesExpected(r.value, c.expected);
+    if (!m.ok) throw new Error(m.error); // or return INVALID_CONDITION
+    if (!m.matched) return false;
+  }
+  return true;
+}
+
+// --------------------
+// Variable ordering
+// --------------------
+
+function orderVarsByConstraintStrength(
+  usedVars: SelectorVar[],
+  condList: Array<{ key: string; expected: any; vars: SelectorVar[] }>,
+): SelectorVar[] {
+  const freq = new Map<SelectorVar, number>();
+  for (const v of usedVars) freq.set(v, 0);
+
+  for (const c of condList) {
+    for (const v of c.vars) {
+      if (freq.has(v)) freq.set(v, (freq.get(v) ?? 0) + 1);
+    }
+  }
+
+  return usedVars.slice().sort((a, b) => {
+    const fa = freq.get(a) ?? 0;
+    const fb = freq.get(b) ?? 0;
+    if (fb !== fa) return fb - fa; // more constrained first
+    // tie-break: numeric order
+    return compareSelectorVar(a, b);
+  });
+}
+
+// --------------------
+// Root inference
+// --------------------
+
+function detectRoots(
+  keys: string[],
+  usedVars: SelectorVar[],
+): Record<string, string> {
+  const roots: Record<string, string> = {};
+  for (const v of usedVars) {
+    let best: string | null = null;
+    for (const k of keys) {
+      const pref = prefixBeforeVarSegment(k, v);
+      if (!pref) continue;
+      if (best == null || pref.length > best.length) best = pref;
+    }
+    if (best) roots[v] = best;
+  }
+  return roots;
+}
+
+function prefixBeforeVarSegment(
+  path: string,
+  varName: SelectorVar,
+): string | null {
+  const parts = (path ?? "").trim().split(".").filter(Boolean);
+  const idx = parts.findIndex((p) => p === varName);
+  if (idx <= 0) return null;
+  return parts.slice(0, idx).join(".");
+}
+
+// --------------------
+// Var detection utilities
+// --------------------
+
+function detectUsedVars(keys: string[]): SelectorVar[] {
+  const set = new Set<string>();
+  for (const k of keys) for (const v of varsInPath(k)) set.add(v);
+
+  const out: SelectorVar[] = [];
+  for (const raw of set) {
+    if (!/^(\$X([1-9]|10))$/.test(raw)) {
+      throw new Error(`Unsupported selector var: ${raw}. Supported: $X1..$X10`);
+    }
+    out.push(raw as SelectorVar);
   }
   return out;
 }
 
-export function applyBindingsToMappings(
-  mappings: ReadonlyArray<MappingV1>,
-  bindings: SelectorBindings,
-): MappingV1[] {
-  return mappings.map((m) => {
-    if (typeof m === "string") return applyBindingsToPath(m, bindings);
-    const mm = m as MappingObjV1;
-    return { ...mm, path: applyBindingsToPath(mm.path, bindings) };
-  });
+function varsInPath(path: string): SelectorVar[] {
+  const parts = (path ?? "").split(".");
+  const out: SelectorVar[] = [];
+  for (const p of parts) {
+    if (/^\$X([1-9]|10)$/.test(p)) out.push(p as SelectorVar);
+  }
+  return out;
 }
 
-/** ---------- internals ---------- */
-
-function detectUsedVars(keys: string[]): Set<SelectorVar> {
-  const s = new Set<SelectorVar>();
-  for (const k of keys) {
-    if (containsVar(k, "$X1")) s.add("$X1");
-    if (containsVar(k, "$X2")) s.add("$X2");
-  }
-  return s;
-}
-
-/**
- * Root per variable:
- *  - customers.$X1.fleet.id  => $X1 root = "customers"
- *  - customers.$X1.devices.$X2.id => $X2 root = "customers.$X1.devices"
- */
-function detectRoots(keys: string[]): Partial<Record<SelectorVar, string>> {
-  const roots: Partial<Record<SelectorVar, string>> = {};
-
-  for (const k of keys) {
-    const r1 = extractRoot(k, "$X1");
-    if (r1) roots["$X1"] = mergeRoot("$X1", roots["$X1"], r1);
-
-    const r2 = extractRoot(k, "$X2");
-    if (r2) roots["$X2"] = mergeRoot("$X2", roots["$X2"], r2);
-  }
-
-  const x2r = roots["$X2"];
-  if (x2r && containsVar(x2r, "$X1") && !roots["$X1"]) {
-    throw new Error(
-      `$X2 root depends on $X1 but no $X1 root found. Root: ${x2r}`,
-    );
-  }
-
-  return roots;
-}
-
-function mergeRoot(
-  v: SelectorVar,
-  existing: string | undefined,
-  next: string,
-): string {
-  if (!existing) return next;
-  if (existing === next) return existing;
-  throw new Error(
-    `v1 supports a single root per selector variable. ${v} roots: '${existing}' vs '${next}'`,
+function hasAnyVarSegment(path: string): boolean {
+  return (
+    /\.\$X([1-9]|10)(\.|$)/.test(path) || /^\$X([1-9]|10)(\.|$)/.test(path)
   );
 }
 
-function extractRoot(path: string, v: SelectorVar): string | null {
-  const needle = `.${v}.`;
-  const i = path.indexOf(needle);
-  if (i >= 0) return path.slice(0, i);
-
-  const tail = `.${v}`;
-  if (path.endsWith(tail)) return path.slice(0, -tail.length);
-
-  return null;
+function hasUnresolvedSelectorToken(p: string): boolean {
+  return /\.\$X\d+(\.|$)/.test(p) || /^\$X\d+(\.|$)/.test(p);
 }
 
-function containsVar(path: string, v: SelectorVar): boolean {
-  return path.includes(`.${v}.`) || path.endsWith(`.${v}`);
+function compareSelectorVar(a: SelectorVar, b: SelectorVar): number {
+  const na = Number(a.slice(2));
+  const nb = Number(b.slice(2));
+  return na - nb;
 }
 
-function containsAnyVar(path: string): boolean {
-  return containsVar(path, "$X1") || containsVar(path, "$X2");
-}
+// --------------------
+// Binding substitution
+// --------------------
 
-/**
- * Scan root array to bind varName.
- * Skips conditions that still contain unresolved vars.
- */
-function bindVarByScanningRoot(
-  varName: SelectorVar,
-  rootPath: string,
-  condKeys: string[],
-  conditions: Record<string, unknown>,
-  bindingsAlready: SelectorBindings,
-  ctx: SelectorContext,
-): number | null {
-  const rootResolved = resolvePath(ctx.ns, rootPath, ctx.resolveOpts);
-  const arr = rootResolved.value;
-  if (!Array.isArray(arr)) return null;
-
-  for (let i = 0; i < arr.length; i++) {
-    const trialBindings: SelectorBindings = {
-      ...bindingsAlready,
-      [varName]: i,
-    };
-
-    let ok = true;
-    for (const k of condKeys) {
-      const expected = conditions[k];
-      const kk = applyBindingsToPath(k, trialBindings);
-
-      if (containsAnyVar(kk)) continue; // unresolved var remains
-
-      const r = resolvePath(ctx.ns, kk, ctx.resolveOpts);
-      if (!matchesExpected(r.value, expected)) {
-        ok = false;
-        break;
+export function applyBindingsToPath(
+  path: string,
+  bindings: SelectorBindings,
+): string {
+  const parts = (path ?? "").split(".");
+  return parts
+    .map((seg) => {
+      if (/^\$X\d+$/.test(seg)) {
+        const v = bindings[seg];
+        return typeof v === "number" ? String(v) : seg;
       }
-    }
-    if (ok) return i;
-  }
-
-  return null;
+      return seg;
+    })
+    .join(".");
 }
 
-function matchesExpected(actual: any, expected: any): boolean {
-  if (Array.isArray(expected)) return expected.includes(actual);
-  return actual === expected;
+export function applyBindingsToMappings(
+  mappings: ReadonlyArray<any>,
+  bindings: SelectorBindings,
+): ReadonlyArray<any> {
+  return mappings.map((m) => {
+    if (typeof m === "string") return applyBindingsToPath(m, bindings);
+    return { ...m, path: applyBindingsToPath(m.path, bindings) };
+  });
 }
+
+// --------------------
+// Expected matching
+// --------------------
+
+// function matchesExpected(actual: any, expected: any): boolean {
+//   if (Array.isArray(expected)) return expected.includes(actual);
+//   return actual === expected;
+// }
+
+// function matchesExpected(actual: any, expected: any): boolean {
+//   // Operator object syntax
+//   if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+//     if ("equalsIgnoreCase" in expected) {
+//       return (
+//         typeof actual === "string" &&
+//         typeof expected.equalsIgnoreCase === "string" &&
+//         actual.toLowerCase() === expected.equalsIgnoreCase.toLowerCase()
+//       );
+//     }
+
+//     if ("inIgnoreCase" in expected) {
+//       if (!Array.isArray(expected.inIgnoreCase)) return false;
+//       if (typeof actual !== "string") return false;
+
+//       const lower = actual.toLowerCase();
+//       return expected.inIgnoreCase.some(
+//         (v: any) => typeof v === "string" && v.toLowerCase() === lower,
+//       );
+//     }
+//   }
+
+//   // existing behavior
+//   if (Array.isArray(expected)) {
+//     return expected.includes(actual);
+//   }
+
+//   return actual === expected;
+// }

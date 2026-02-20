@@ -14,10 +14,12 @@ import { TransformRegistry } from "../transforms/TransformRegistry.js";
 import { resolvePath, type Namespaces } from "../resolvers/PathResolver.js";
 import {
   bindSelectorsV1,
+  bindSelectorsAllV1,
   applyBindingsToMappings,
   applyBindingsToPath,
   type SelectorBindings,
 } from "./SelectorEngine.js";
+import { matchesExpected } from "./ConditionEvaluator.js";
 
 export async function runRules(
   spec: RuleDocumentV1,
@@ -31,6 +33,25 @@ export async function runRules(
 > {
   const out: any = {};
   const matched: Record<string, MatchedInfo | undefined> = {};
+
+  // ✅ per-run allocator
+  const appendIndexByBindingKey = new Map<string, number>();
+
+  function bindingKeyForAppend(b: SelectorBindings): string {
+    const keys = Object.keys(b)
+      .filter((k) => k.startsWith("$X") && k !== "$X")
+      .sort((a, c) => a.localeCompare(c));
+    return keys.map((k) => `${k}=${(b as any)[k]}`).join("|");
+  }
+
+  function allocAppendIndex(b: SelectorBindings): number {
+    const key = bindingKeyForAppend(b);
+    const existing = appendIndexByBindingKey.get(key);
+    if (existing != null) return existing;
+    const next = appendIndexByBindingKey.size;
+    appendIndexByBindingKey.set(key, next);
+    return next;
+  }
 
   const metaBase: MapMeta = {
     inputType,
@@ -167,14 +188,162 @@ export async function runRules(
     // -------------------------
     // Determine loop driver prefix from first path containing $X
     const driverPrefix = findLoopDriverPrefix(entries);
+
     if (!driverPrefix) {
-      const e: MapError = err(
-        "INVALID_LOOP_RULE",
-        `Looped target '${targetKey}' contains $X but no mapping/condition path contains $X to infer driver array`,
-        { targetKey },
-        targetKey,
-      );
-      return { ok: false, result: { ok: false, error: e, meta: metaBase } };
+      // -------------------------------------------------------
+      // APPEND MODE (Option A):
+      // target uses $X, but no mapping/condition contains $X.
+      // We append based on selector bindings ($X1..$X10) and
+      // allocate a stable metrics index per binding map.
+      // -------------------------------------------------------
+      let producedCount = 0;
+      let matchedAnyBinding = false;
+
+      // For priority-per-binding we need: for this targetKey, which bindingKeys are already decided?
+      const decidedForBinding = new Set<string>();
+
+      // For append mode, we need ALL possible selector bindings.
+      // ✅ New API you will add soon: bindSelectorsAllV1(...)
+      // For now, if you don't have it yet, you can temporarily treat bindSelectorsV1 as single binding.
+      //
+      // We'll code against bindSelectorsAllV1 result shape:
+      //   kind: "none" | "bound" | "boundMany"
+      //
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]!;
+
+        const selAll = bindSelectorsAllV1(entry, {
+          ns: namespaces,
+          resolveOpts: resolverOpts,
+        });
+
+        if (!selAll.ok) {
+          const e: MapError = err(
+            "INVALID_SELECTOR_ROOT",
+            selAll.error.message,
+            { targetKey, ruleIndex: i },
+            targetKey,
+          );
+          return { ok: false, result: { ok: false, error: e, meta: metaBase } };
+        }
+
+        const bindingsList: ReadonlyArray<SelectorBindings> =
+          selAll.result.kind === "boundMany"
+            ? selAll.result.bindings
+            : selAll.result.kind === "bound"
+              ? [selAll.result.bindings]
+              : [];
+
+        if (bindingsList.length === 0) continue;
+
+        matchedAnyBinding = true;
+
+        // Priority-per-binding: for each binding, first matching entry wins.
+        for (const selBindings of bindingsList) {
+          const bKey = bindingKeyForAppend(selBindings);
+          if (decidedForBinding.has(bKey)) continue;
+
+          const outIndex = allocAppendIndex(selBindings);
+          const loopBindings = { $X: outIndex };
+          const combined = mergeBindings(selBindings, loopBindings);
+
+          // This should be true given bindSelectorsAllV1, but keep it safe.
+          if (!conditionsMatch(entry, namespaces, resolverOpts, combined))
+            continue;
+
+          const concreteTarget = substituteVar(targetKey, loopBindings);
+
+          // value wins
+          if ("value" in entry && entry.value !== undefined) {
+            setByDotPath(out, concreteTarget, entry.value);
+            producedCount++;
+            decidedForBinding.add(bKey);
+
+            matched[concreteTarget] = {
+              ruleIndex: i,
+              mappingPath: "(value)",
+              selector: combined ? sanitizeSelector(combined) : undefined,
+            };
+            continue;
+          }
+
+          const mappings = entry.mappings ?? [];
+          const mres = resolveMappings(
+            mappings,
+            namespaces,
+            resolverOpts,
+            transforms,
+            ctx,
+            combined,
+          );
+
+          if (!mres.ok) {
+            const e: MapError = err(
+              "TRANSFORM_ERROR",
+              mres.error.message,
+              mres.error.details,
+              concreteTarget,
+            );
+            return {
+              ok: false,
+              result: { ok: false, error: e, meta: metaBase },
+            };
+          }
+
+          if (mres.valueFound) {
+            setByDotPath(out, concreteTarget, mres.value);
+            producedCount++;
+            decidedForBinding.add(bKey);
+
+            matched[concreteTarget] = {
+              ruleIndex: i,
+              mappingPath: mres.usedPath,
+              selector: combined ? sanitizeSelector(combined) : undefined,
+            };
+            continue;
+          }
+
+          // ✅ matched entry but produced nothing:
+          // treat as "wrong mapping" and STOP for this binding (priority semantics)
+          if (entry.required) {
+            const e: MapError = err(
+              "MISSING_REQUIRED_FIELD",
+              `Required field '${targetKey}' matched rule ${i} but no mapping/value produced a result`,
+              { attempted: mappings },
+              targetKey,
+            );
+            return {
+              ok: false,
+              result: { ok: false, error: e, meta: metaBase },
+            };
+          }
+
+          decidedForBinding.add(bKey);
+          // we do NOT set any output for this binding
+        }
+      }
+
+      if (anyRequired && producedCount === 0) {
+        const e: MapError = err(
+          "MISSING_REQUIRED_FIELD",
+          `Required looped field '${targetKey}' produced no output elements`,
+          { targetKey },
+          targetKey,
+        );
+        return { ok: false, result: { ok: false, error: e, meta: metaBase } };
+      }
+
+      if (anyRequired && !matchedAnyBinding) {
+        const e: MapError = err(
+          "NO_RULE_MATCHED_REQUIRED",
+          `Required looped field '${targetKey}' did not match any rule entry`,
+          { targetKey },
+          targetKey,
+        );
+        return { ok: false, result: { ok: false, error: e, meta: metaBase } };
+      }
+
+      continue;
     }
 
     const driverResolved = resolvePath(namespaces, driverPrefix, resolverOpts);
@@ -380,21 +549,27 @@ function conditionsMatch(
     const kk = bindings ? applyBindingsToPath(k, bindings) : k;
 
     // If still unresolved selector tokens remain, treat as no match.
-    if (kk.includes(".$X1") || kk.includes(".$X2")) return false;
+    if (hasUnresolvedSelectorToken(kk)) return false;
 
     const r = resolvePath(ns, kk, resolverOpts);
-    if (!matchesExpected(r.value, expected)) return false;
+    const m = matchesExpected(r.value, expected);
+    if (!m.ok) throw new Error(m.error); // or return INVALID_CONDITION
+    if (!m.matched) return false;
   }
 
   return true;
 }
 
-function matchesExpected(actual: any, expected: any): boolean {
-  if (Array.isArray(expected)) {
-    return expected.includes(actual);
-  }
-  return actual === expected;
+function hasUnresolvedSelectorToken(p: string): boolean {
+  return /\.\$X\d+(\.|$)/.test(p) || /^\$X\d+(\.|$)/.test(p);
 }
+
+// function matchesExpected(actual: any, expected: any): boolean {
+//   if (Array.isArray(expected)) {
+//     return expected.includes(actual);
+//   }
+//   return actual === expected;
+// }
 
 function resolveMappings(
   mappings: ReadonlyArray<MappingV1>,
@@ -417,7 +592,7 @@ function resolveMappings(
     const transformNames =
       typeof m === "string" ? undefined : (m as MappingObjV1).transform;
 
-    if (path.includes(".$X1") || path.includes(".$X2")) continue;
+    if (hasUnresolvedSelectorToken(path)) continue;
 
     const r = resolvePath(ns, path, resolverOpts);
     lastUsed = r.usedPath;

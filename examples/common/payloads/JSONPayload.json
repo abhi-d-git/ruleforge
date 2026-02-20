@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "requestId": "req-2026-02-20-0001",
+    "transactionId": "transactionId_1"
+  },
+  "message": "{\"source\":{\"system\":\"serviceA\"},\"user\":{\"id\":\"SA-12345\",\"name\":\"John Doe\"},\"customers\":[{\"name\":\"c1\",\"value\":\"v1\",\"id\":\"id_1\"},{\"name\":\"c2\",\"value\":\"v2\",\"id\":\"id_2\"}],\"account\":{\"balance\":\"1500.50\",\"id\":\"acc_id_1\"}}",
+  "jsonData": "{\"device\":{\"serialNumber\":\"XXX1234567\"},\"collector\":{\"name\":\"agent-runner\"}}",
+  "payload": {
+    "source": {
+      "system": "serviceA"
+    },
+    "user": {
+      "id": "SA-12345",
+      "name": "John Doe"
+    },
+    "contact": {
+      "email": "john@serviceA.com"
+    },
+    "customers": [
+      {
+        "fleet": {
+          "id": "fleetId_1",
+          "name": "Fleet_One"
+        },
+        "devices": [
+          {
+            "id": "deviceId_1",
+            "serialNum": 100
+          }
+        ]
+      },
+      {
+        "fleet": {
+          "id": "fleetId_5",
+          "name": "Fleet_Five"
+        },
+        "devices": [
+          {
+            "id": "x",
+            "serialNum": 101
+          },
+          {
+            "id": "y",
+            "serialNum": 102
+          },
+          {
+            "id": "deviceId_10",
+            "serialNum": 200
+          }
+        ]
+      }
+    ],
+    "account": {
+      "balance": "1500.50",
+      "id": "acc_id_1",
+      "totalSum": "1500.50"
+    },
+    "ConsumableTreeSupply": [
+      {
+        "Type": "fuser",
+        "Description": "Fuser1",
+        "modelNumber": "fuser1-modelNumber"
+      },
+      {
+        "Type": "toner",
+        "Description": "Black Toner",
+        "modelNumber": "toner-modelNumber"
+      }
+    ],
+    "CounterSubunit": {
+      "CounterGroup": [
+        {
+          "CounterGroupName": "OuterGroup1",
+          "CounterGroup": [
+            {
+              "MediaOutputID": "Face-down",
+              "Counter": [
+                {
+                  "CounterName": "FaceDownSheets",
+                  "FixedPointNumber": {
+                    "Significand": 17,
+                    "Exponent": 0
+                  }
+                },
+                {
+                  "CounterName": "TotalSheets",
+                  "FixedPointNumber": {
+                    "Significand": 17,
+                    "Exponent": 0
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "CounterGroupName": "OuterGroup2",
+          "Counter": [
+            {
+              "CounterName": "Impressions1",
+              "FixedPointNumber": {
+                "Significand": 18,
+                "Exponent": 0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

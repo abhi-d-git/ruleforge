@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<UsageCollection xmlns="UsageCollection">
+  <!-- Top-level fields used by mapping examples -->
+  <UsageService>
+    <SystemId>DefaultSourceSystemId</SystemId>
+  </UsageService>
+
+  <TransactionID>tx-2026-02-20-0001</TransactionID>
+  <Account>
+    <AccountID>Account_1</AccountID>
+    <name>Account_Name_1</name>
+  </Account>
+  <Asset>
+    <AssetSerialNumber>CNB1234567</AssetSerialNumber>
+
+    <Result>
+      <WsUsage>
+        <!-- Example: CDATA contains an entire SOAP envelope -->
+        <DeviceSupplies><![CDATA[
+<s:Envelope xmlns:a="http://schemas.xmlsoap.org/ws/2004/08/addressing"
+            xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+  <s:Body>
+    <Supplies>
+      <SupplyList>
+        <Supply>
+          <Counter>
+            <CounterName>AgentSuppliesRemoved</CounterName>
+            <FixedPointNumber>
+              <Significand>1</Significand>
+              <Exponent>0</Exponent>
+            </FixedPointNumber>
+          </Counter>
+          <ConsumableTypeEnum>fuser</ConsumableTypeEnum>
+          <Description>Fuser1</Description>
+          <ProductNumber>110V, 220V</ProductNumber>
+        </Supply>
+        <Supply>
+          <Counter>
+            <CounterName>AgentSuppliesRemoved</CounterName>
+            <FixedPointNumber>
+              <Significand>2</Significand>
+              <Exponent>0</Exponent>
+            </FixedPointNumber>
+          </Counter>
+          <ConsumableTypeEnum>toner</ConsumableTypeEnum>
+          <Description>ColorToner</Description>
+          <ProductNumber>TONER-1</ProductNumber>
+        </Supply>
+      </SupplyList>
+    </Supplies>
+  </s:Body>
+</s:Envelope>
+        ]]></DeviceSupplies>
+      </WsUsage>
+
+      <!-- Example: nested CounterGroups used for $X1/$X2/$X3 selector DFS -->
+      <CounterSubunit>
+        <CounterGroup>
+          <CounterGroupName>OuterGroup1</CounterGroupName>
+
+          <!-- Inner CounterGroup array (matches your $X2 path cases) -->
+          <CounterGroup>
+            <MediaOutputID>Face-down</MediaOutputID>
+
+            <Counter>
+              <CounterName>FaceDownSheets</CounterName>
+              <FixedPointNumber>
+                <Significand>17</Significand>
+                <Exponent>0</Exponent>
+              </FixedPointNumber>
+            </Counter>
+
+            <Counter>
+              <CounterName>TotalSheets</CounterName>
+              <FixedPointNumber>
+                <Significand>21</Significand>
+                <Exponent>0</Exponent>
+              </FixedPointNumber>
+            </Counter>
+          </CounterGroup>
+
+          <CounterGroup>
+            <MediaOutputID>Face-up</MediaOutputID>
+            <Counter>
+              <CounterName>TotalSheets</CounterName>
+              <FixedPointNumber>
+                <Significand>18</Significand>
+                <Exponent>0</Exponent>
+              </FixedPointNumber>
+            </Counter>
+          </CounterGroup>
+        </CounterGroup>
+
+        <CounterGroup>
+          <CounterGroupName>OuterGroup2</CounterGroupName>
+
+          <!-- Variant: Counter directly under CounterGroup -->
+          <Counter>
+            <CounterName>Impressions1</CounterName>
+            <FixedPointNumber>
+              <Significand>18</Significand>
+              <Exponent>0</Exponent>
+            </FixedPointNumber>
+          </Counter>
+
+          <Counter>
+            <CounterName>Impressions2</CounterName>
+            <FixedPointNumber>
+              <Significand>3</Significand>
+              <Exponent>0</Exponent>
+            </FixedPointNumber>
+          </Counter>
+        </CounterGroup>
+      </CounterSubunit>
+    </Result>
+  </Asset>
+</UsageCollection>

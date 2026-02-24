@@ -33,6 +33,22 @@ export interface FunctionRef {
 export interface MappingObjV1 {
   path: string;
   transform?: ReadonlyArray<string>;
+  // NEW
+  defaultValue?: unknown;
+
+  /**
+   * When to use defaultValue:
+   * - "missing" (default): use defaultValue when resolved value is undefined
+   * - "found": use defaultValue even when path is found (your exact requirement)
+   * - "empty": use defaultValue when resolved value is empty (optional)
+   */
+  defaultWhen?: "missing" | "found" | "empty";
+
+  /**
+   * Only used when defaultWhen === "empty"
+   * default: true
+   */
+  treatNullAsEmpty?: boolean;
 }
 
 export interface RuleDocumentV1 {

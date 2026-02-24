@@ -85,16 +85,36 @@
         "conditions": { "Customer.$X1.fleet.id": "fleetId_5" },
         "mappings": [
           "WrongMapping.AccountID",
-          { "path": "Customer.$X1.fleet.name", "transform": ["trim", "upper"] },
-          { "path": "Customer.name", "transform": ["trim", "upper"] }
+          {
+            "path": "Customer.$X1.fleet.name",
+            "transform": ["trim", "upper"],
+            "defaultValue": "DEFAULT_CUSTOMER_Name",
+            "defaultWhen": "found"
+          },
+          {
+            "path": "Customer.name",
+            "transform": ["trim", "upper"],
+            "defaultValue": "DEFAULT_CUSTOMER_Name",
+            "defaultWhen": "found"
+          }
         ]
       },
       {
-        "conditions": { "Customer.AccountID": "Account_1" },
+        "conditions": {
+          "UsageCollection.Account.?.$X1.AccountID": "Account_1"
+        },
         "mappings": [
           "WrongMapping.AccountID",
-          { "path": "Customer.$X1.fleet.name", "transform": ["trim", "upper"] },
-          { "path": "Customer.name", "transform": ["trim", "upper"] }
+          {
+            "path": "Customer.$X1.fleet.name",
+            "transform": ["trim", "upper"],
+            "defaultValue": "DEFAULT_CUSTOMER_Name",
+            "defaultWhen": "found"
+          },
+          {
+            "path": "UsageCollection.Account.?.$X1.name",
+            "transform": ["trim", "upper"]
+          }
         ]
       }
     ],
@@ -193,11 +213,11 @@
     "transformed.subunitValue": [
       {
         "conditions": {
-          "SubUnits.CounterGroup.$X1.CounterGroupName": "OuterGroup1",
-          "SubUnits.CounterGroup.$X1.CounterGroup.$X2.Counter.$X3.CounterName": "TotalSheets"
+          "SubUnits.CounterGroup.?.$X1.CounterGroupName": "OuterGroup1",
+          "SubUnits.CounterGroup.?.$X1.CounterGroup.$X2.Counter.$X3.CounterName": "TotalSheets"
         },
         "mappings": [
-          "SubUnits.CounterGroup.$X1.CounterGroup.$X2.Counter.$X3.FixedPointNumber.Significand"
+          "SubUnits.CounterGroup.?.$X1.CounterGroup.$X2.Counter.$X3.FixedPointNumber.?.Significand"
         ]
       }
     ]

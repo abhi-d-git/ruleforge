@@ -1,4 +1,4 @@
-import { deepGet } from "../utils/deepGet.js";
+import { deepGet, deepGetWithQ } from "../utils/deepGet.js";
 
 export type NamespaceName = "payload" | "meta" | "pre";
 
@@ -61,7 +61,7 @@ export function resolvePath(
         : namespace === "meta"
           ? ns.meta
           : ns.pre;
-    const value = innerPath ? deepGet(base, innerPath) : base;
+    const value = innerPath ? deepGetWithQ(base, innerPath) : base;
     const usedPath = innerPath ? `$${namespace}.${innerPath}` : `$${namespace}`;
     return { value, usedPath, namespace, usedAlias: false };
   }
@@ -99,7 +99,7 @@ export function resolvePath(
 
   // No alias; resolve directly from payload
   return {
-    value: deepGet(ns.payload, p),
+    value: deepGetWithQ(ns.payload, p),
     usedPath: p,
     namespace: "payload",
     usedAlias: false,
@@ -130,7 +130,7 @@ function resolvePathNoAlias(
         : namespace === "meta"
           ? ns.meta
           : ns.pre;
-    const value = innerPath ? deepGet(base, innerPath) : base;
+    const value = innerPath ? deepGetWithQ(base, innerPath) : base;
     const usedPath = innerPath ? `$${namespace}.${innerPath}` : `$${namespace}`;
     return { value, usedPath, namespace, usedAlias: false };
   }
@@ -146,7 +146,7 @@ function resolvePathNoAlias(
   }
 
   return {
-    value: deepGet(ns.payload, p),
+    value: deepGetWithQ(ns.payload, p),
     usedPath: p,
     namespace: "payload",
     usedAlias: false,
@@ -212,4 +212,10 @@ function findLongestAliasKeyMatch(
   const roots = aliases[bestKey] ?? [];
   if (!roots.length) return null;
   return { key: bestKey, roots };
+}
+
+function asArrayOrSingleton(v: any): any[] | null {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === "object") return [v];
+  return null;
 }

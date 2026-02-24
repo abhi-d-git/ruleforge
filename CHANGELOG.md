@@ -25,3 +25,14 @@
 - Strict invalid operator detection
 - Safer TypeScript typing
 - Guardrails for selector depth and candidate count
+
+## v0.3.1
+
+### Added
+
+- `?` path segment to normalize array-or-singleton XML structures
+  - Works in mappings, conditions, and selector roots
+  - Example: `UsageCollection.Account.?.name`
+
+- `defaultValue` + `defaultWhen` in MappingObjV1
+  - `defaultWhen: "missing" | "found" | "empty"`

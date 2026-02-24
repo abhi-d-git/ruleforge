@@ -571,7 +571,7 @@ function hasUnresolvedSelectorToken(p: string): boolean {
 //   return actual === expected;
 // }
 
-function resolveMappings(
+export function resolveMappings(
   mappings: ReadonlyArray<MappingV1>,
   ns: Namespaces,
   resolverOpts: {
@@ -588,6 +588,8 @@ function resolveMappings(
 
   let lastUsed = "";
   for (const m of m2) {
+    const isObj = typeof m !== "string";
+    const mo = m as MappingObjV1;
     const path = typeof m === "string" ? m : (m as MappingObjV1).path;
     const transformNames =
       typeof m === "string" ? undefined : (m as MappingObjV1).transform;
@@ -596,6 +598,95 @@ function resolveMappings(
 
     const r = resolvePath(ns, path, resolverOpts);
     lastUsed = r.usedPath;
+
+    // -------------------------
+    // NEW defaulting behavior
+    // -------------------------
+    if (isObj) {
+      const defaultWhen = mo.defaultWhen ?? "missing";
+      const hasDefault = Object.prototype.hasOwnProperty.call(
+        mo,
+        "defaultValue",
+      );
+      const treatNullAsEmpty = mo.treatNullAsEmpty ?? true;
+
+      // If "found": if resolved value exists (not undefined), return defaultValue
+      if (defaultWhen === "found") {
+        if (r.value !== undefined) {
+          if (!hasDefault) {
+            return {
+              ok: false,
+              error: {
+                message: `MappingObjV1.defaultWhen="found" requires defaultValue`,
+                details: { path },
+              },
+            };
+          }
+          try {
+            const v = transforms.apply(mo.defaultValue, transformNames, ctx);
+            return {
+              ok: true,
+              valueFound: true,
+              value: v,
+              usedPath: r.usedPath,
+            };
+          } catch (e: any) {
+            return {
+              ok: false,
+              error: {
+                message: e?.message ?? String(e),
+                details: { path, transformNames, usedDefault: true },
+              },
+            };
+          }
+        }
+        // if not found, fall through to next mapping candidate
+        continue;
+      }
+
+      // If missing and path missing -> use default
+      if (defaultWhen === "missing" && r.value === undefined && hasDefault) {
+        try {
+          const v = transforms.apply(mo.defaultValue, transformNames, ctx);
+          return { ok: true, valueFound: true, value: v, usedPath: r.usedPath };
+        } catch (e: any) {
+          return {
+            ok: false,
+            error: {
+              message: e?.message ?? String(e),
+              details: { path, transformNames, usedDefault: true },
+            },
+          };
+        }
+      }
+
+      // If empty -> use default when value is empty
+      if (defaultWhen === "empty" && hasDefault) {
+        if (r.value !== undefined && isEmptyValue(r.value, treatNullAsEmpty)) {
+          try {
+            const v = transforms.apply(mo.defaultValue, transformNames, ctx);
+            return {
+              ok: true,
+              valueFound: true,
+              value: v,
+              usedPath: r.usedPath,
+            };
+          } catch (e: any) {
+            return {
+              ok: false,
+              error: {
+                message: e?.message ?? String(e),
+                details: { path, transformNames, usedDefault: true },
+              },
+            };
+          }
+        }
+      }
+    }
+
+    // -------------------------
+    // Existing behavior
+    // -------------------------
 
     if (r.value === undefined) continue;
 
@@ -622,4 +713,13 @@ function sanitizeSelector(bindings: SelectorBindings): Record<string, number> {
     if (typeof v === "number") out[k] = v;
   }
   return out;
+}
+
+function isEmptyValue(v: any, treatNullAsEmpty: boolean): boolean {
+  if (v === undefined) return true;
+  if (v === null) return treatNullAsEmpty;
+  if (typeof v === "string") return v.trim().length === 0;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v).length === 0;
+  return false;
 }

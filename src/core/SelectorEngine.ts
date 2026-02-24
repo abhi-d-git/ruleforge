@@ -172,8 +172,13 @@ function dfsBind(args: {
   if (hasUnresolvedSelectorToken(rootConcrete)) return;
 
   const rr = resolvePath(ctx.ns, rootConcrete, ctx.resolveOpts);
-  const arr = rr.value;
-  if (!Array.isArray(arr)) return;
+  const v0 = rr.value;
+  let arr: any[] | undefined;
+
+  if (Array.isArray(v0)) arr = v0;
+  else if (v0 && typeof v0 === "object")
+    arr = [v0]; // singleton -> array
+  else return;
 
   const maxScan = Math.min(arr.length, MAX_SCAN_PER_ARRAY);
 
@@ -359,6 +364,12 @@ export function applyBindingsToMappings(
     if (typeof m === "string") return applyBindingsToPath(m, bindings);
     return { ...m, path: applyBindingsToPath(m.path, bindings) };
   });
+}
+
+function asArrayOrSingleton(v: any): any[] | null {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === "object") return [v];
+  return null;
 }
 
 // --------------------

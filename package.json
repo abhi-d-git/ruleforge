@@ -1,6 +1,6 @@
 {
   "name": "ruleforge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Declarative rule engine to map JSON/XML payloads into canonical nested JSON.",
   "type": "module",
   "main": "./dist/index.js",
